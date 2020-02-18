@@ -20,7 +20,7 @@ type Task struct {
 
 func main() {
 	res := make(chan Task)
-	mutex := make(chan struct{}, MaxGoroutineCount)
+	sem := make(chan struct{}, MaxGoroutineCount)
 	total := 0
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -28,7 +28,7 @@ func main() {
 		if url == "" {
 			break
 		}
-		go Handle(res, &url, mutex)
+		go Handle(res, &url, sem)
 		tmp := <-res
 		if tmp.err != nil {
 			fmt.Printf("Ошибка подсчёта в %s. Сообщение об ошибке: %s\n",
@@ -45,13 +45,13 @@ func main() {
 		total += tmp.count
 	}
 	close(res)
-	close(mutex)
+	close(sem)
 	fmt.Printf("Общее количество: %d", total)
 }
 
-func Handle(c chan Task, url *string, mutex chan struct{}) {
+func Handle(c chan Task, url *string, sem chan struct{}) {
 	// lock
-	mutex <- struct{}{}
+	sem <- struct{}{}
 	resp, err := http.Get(*url)
 	if err != nil {
 		c <- Task{err: err, url: *url}
@@ -63,7 +63,7 @@ func Handle(c chan Task, url *string, mutex chan struct{}) {
 	count := GetGoCount(responseText)
 	c <- Task{url: *url, count: count}
 	// release
-	<-mutex
+	<-sem
 }
 func GetGoCount(source string) (count int) {
 	for i := 0; i < len(source)-1; i++ {
