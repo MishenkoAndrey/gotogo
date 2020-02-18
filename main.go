@@ -20,16 +20,15 @@ type Task struct {
 
 func main() {
 	res := make(chan Task)
-	queue := make(chan string, MaxGoroutineCount)
+	mutex := make(chan struct{}, MaxGoroutineCount)
 	total := 0
 	scanner := bufio.NewScanner(os.Stdin)
-	go Handle(res, queue)
 	for scanner.Scan() {
 		url := scanner.Text()
 		if url == "" {
 			break
 		}
-		queue <- url
+		go Handle(res, &url, mutex)
 		tmp := <-res
 		if tmp.err != nil {
 			fmt.Printf("Ошибка подсчёта в %s. Сообщение об ошибке: %s\n",
@@ -46,25 +45,25 @@ func main() {
 		total += tmp.count
 	}
 	close(res)
-	close(queue)
+	close(mutex)
 	fmt.Printf("Общее количество: %d", total)
 }
 
-func Handle(c chan Task, q chan string) {
-	for url := range q {
-		go func(url *string, c chan Task) {
-			resp, err := http.Get(*url)
-			if err != nil {
-				c <- Task{err: err, url: *url}
-				return
-			}
-			defer resp.Body.Close()
-			body, _ := ioutil.ReadAll(resp.Body)
-			responseText := string(body)
-			count := GetGoCount(responseText)
-			c <- Task{url: *url, count: count}
-		}(&url, c)
+func Handle(c chan Task, url *string, mutex chan struct{}) {
+	// lock
+	mutex <- struct{}{}
+	resp, err := http.Get(*url)
+	if err != nil {
+		c <- Task{err: err, url: *url}
+		return
 	}
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	responseText := string(body)
+	count := GetGoCount(responseText)
+	c <- Task{url: *url, count: count}
+	// release
+	<-mutex
 }
 func GetGoCount(source string) (count int) {
 	for i := 0; i < len(source)-1; i++ {
